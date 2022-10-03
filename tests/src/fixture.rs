@@ -113,15 +113,21 @@ pub struct TestContext {
 }
 
 impl TestContext {
-    pub async fn start_and_sync_to(&self, stop_block: BlockPtr) {
+    pub async fn start_and_sync_to(&self, stop_block: BlockPtr, expect_healthy: bool) {
         self.provider
             .start(self.deployment.clone(), Some(stop_block.number))
             .await
             .expect("unable to start subgraph");
 
-        wait_for_sync(&self.logger, &self.store, &self.deployment.hash, stop_block)
-            .await
-            .unwrap();
+        wait_for_sync(
+            &self.logger,
+            &self.store,
+            &self.deployment.hash,
+            stop_block,
+            expect_healthy,
+        )
+        .await
+        .unwrap();
     }
 
     pub async fn query(&self, query: &str) -> Result<Option<r::Value>, Vec<QueryError>> {
@@ -336,6 +342,7 @@ pub async fn wait_for_sync(
     store: &SubgraphStore,
     hash: &DeploymentHash,
     stop_block: BlockPtr,
+    expect_healthy: bool,
 ) -> Result<(), Error> {
     let mut err_count = 0;
     while err_count < 10 {
@@ -351,12 +358,17 @@ pub async fn wait_for_sync(
         };
 
         if block_ptr == stop_block {
+            info!(logger, "TEST: reached stop block");
             break;
         }
 
-        if !store.is_healthy(&hash).await.unwrap() {
+        if expect_healthy && !store.is_healthy(&hash).await.unwrap() {
             return Err(anyhow::anyhow!("subgraph failed unexpectedly"));
         }
+    }
+
+    if expect_healthy && !store.is_healthy(&hash).await.unwrap() {
+        return Err(anyhow::anyhow!("subgraph failed unexpectedly"));
     }
 
     Ok(())
@@ -364,6 +376,8 @@ pub async fn wait_for_sync(
 
 /// `chain` is the sequence of chain heads to be processed. If the next block to be processed in the
 /// chain is not a descendant of the previous one, reorgs will be emitted until it is.
+///
+/// If the stream is reset, emitted reorged blocks will not be emitted again.
 /// See also: static-stream-builder
 struct StaticStreamBuilder<C: Blockchain> {
     chain: Vec<BlockWithTriggers<C>>,
@@ -484,20 +498,47 @@ impl<C: Blockchain> TriggersAdapterSelector<C> for NoopAdapterSelector<C> {
         _capabilities: &<C as Blockchain>::NodeCapabilities,
         _unified_api_version: graph::data::subgraph::UnifiedMappingApiVersion,
     ) -> Result<Arc<dyn graph::blockchain::TriggersAdapter<C>>, Error> {
-        Ok(Arc::new(NoopTriggersAdapter {
+        // Return no triggers on data source reprocessing.
+        let triggers_in_block = Arc::new(|block| Ok(BlockWithTriggers::new(block, Vec::new())));
+        Ok(Arc::new(MockTriggersAdapter {
             x: PhantomData,
+            triggers_in_block,
             triggers_in_block_sleep: self.triggers_in_block_sleep,
         }))
     }
 }
 
-struct NoopTriggersAdapter<C> {
+pub struct MockAdapterSelector<C: Blockchain> {
+    pub x: PhantomData<C>,
+    pub triggers_in_block_sleep: Duration,
+    pub triggers_in_block:
+        Arc<dyn Fn(<C as Blockchain>::Block) -> Result<BlockWithTriggers<C>, Error> + Sync + Send>,
+}
+
+impl<C: Blockchain> TriggersAdapterSelector<C> for MockAdapterSelector<C> {
+    fn triggers_adapter(
+        &self,
+        _loc: &DeploymentLocator,
+        _capabilities: &<C as Blockchain>::NodeCapabilities,
+        _unified_api_version: graph::data::subgraph::UnifiedMappingApiVersion,
+    ) -> Result<Arc<dyn graph::blockchain::TriggersAdapter<C>>, Error> {
+        Ok(Arc::new(MockTriggersAdapter {
+            x: PhantomData,
+            triggers_in_block: self.triggers_in_block.clone(),
+            triggers_in_block_sleep: self.triggers_in_block_sleep,
+        }))
+    }
+}
+
+struct MockTriggersAdapter<C: Blockchain> {
     x: PhantomData<C>,
     triggers_in_block_sleep: Duration,
+    triggers_in_block:
+        Arc<dyn Fn(<C as Blockchain>::Block) -> Result<BlockWithTriggers<C>, Error> + Sync + Send>,
 }
 
 #[async_trait]
-impl<C: Blockchain> TriggersAdapter<C> for NoopTriggersAdapter<C> {
+impl<C: Blockchain> TriggersAdapter<C> for MockTriggersAdapter<C> {
     async fn ancestor_block(
         &self,
         _ptr: BlockPtr,
@@ -523,8 +564,7 @@ impl<C: Blockchain> TriggersAdapter<C> for NoopTriggersAdapter<C> {
     ) -> Result<BlockWithTriggers<C>, Error> {
         tokio::time::sleep(self.triggers_in_block_sleep).await;
 
-        // Return no triggers on data source reprocessing.
-        Ok(BlockWithTriggers::new(block, Vec::new()))
+        (self.triggers_in_block)(block)
     }
 
     async fn is_on_main_chain(&self, _ptr: BlockPtr) -> Result<bool, Error> {

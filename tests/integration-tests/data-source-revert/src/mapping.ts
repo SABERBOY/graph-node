@@ -11,6 +11,7 @@ import { DataSourceCount } from "../generated/schema";
 export function handleBlock(block: ethereum.Block): void {
   let context = new DataSourceContext();
   context.setBigInt("number", block.number);
+  context.setBytes("hash", block.hash);
 
   Template.createWithContext(
     changetype<Address>(Address.fromHexString(

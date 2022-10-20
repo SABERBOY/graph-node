@@ -191,7 +191,7 @@ fn add_filter_type(
                 position: Pos::default(),
                 description: None,
                 name: "and".to_string(),
-                value_type: Type::NamedType(filter_type_name.to_owned()),
+                value_type: Type::ListType(Box::new(Type::NamedType(filter_type_name.to_owned()))),
                 default_value: None,
                 directives: vec![],
             });
@@ -199,7 +199,7 @@ fn add_filter_type(
                 position: Pos::default(),
                 description: None,
                 name: "or".to_string(),
-                value_type: Type::NamedType(filter_type_name.to_owned()),
+                value_type: Type::ListType(Box::new(Type::NamedType(filter_type_name.to_owned()))),
                 default_value: None,
                 directives: vec![],
             });

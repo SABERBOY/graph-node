@@ -254,6 +254,15 @@ impl<C: Blockchain> RuntimeHostTrait<C> for RuntimeHost<C> {
     fn creation_block_number(&self) -> Option<BlockNumber> {
         self.data_source.creation_block()
     }
+
+    /// Offchain data sources track done_at which is set once the
+    /// trigger has been processed.
+    fn done_at(&self) -> Option<BlockNumber> {
+        match self.data_source() {
+            DataSource::Onchain(_) => None,
+            DataSource::Offchain(ds) => ds.done_at(),
+        }
+    }
 }
 
 impl<C: Blockchain> PartialEq for RuntimeHost<C> {

@@ -150,13 +150,7 @@ async fn file_data_sources() {
     // than expected to fetch the file from IPFS. The sleep here will conveniently happen after the
     // data source is added to the offchain monitor but before the monitor is checked, in an an
     // attempt to ensure the monitor has enough time to fetch the file.
-    let adapter_selector = NoopAdapterSelector {
-        x: PhantomData,
-        triggers_in_block_sleep: Duration::from_millis(100),
-    };
-    let chain = Arc::new(
-        fixture::ethereum::chain_with_adapter_selector(blocks, &stores, adapter_selector).await,
-    );
+    let chain = Arc::new(chain(blocks, &stores, None).await);
     let ctx = fixture::setup(subgraph_name.clone(), &hash, &stores, chain, None, None).await;
     ctx.start_and_sync_to(stop_block, true).await;
 
@@ -327,5 +321,7 @@ async fn retry_create_ds() {
     )
     .await;
 
-    ctx.start_and_sync_to(stop_block, false).await;
+    let runner = ctx.runner(stop_block).await;
+    let runner = runner.run_for_test(true).await.unwrap();
+    assert_eq!(runner.ctx.instance.hosts.len(), 1);
 }

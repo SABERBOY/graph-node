@@ -28,12 +28,12 @@ const MINUTE: Duration = Duration::from_secs(60);
 
 const SKIP_PTR_UPDATES_THRESHOLD: Duration = Duration::from_secs(60 * 5);
 
-pub(crate) struct SubgraphRunner<C, T>
+pub struct SubgraphRunner<C, T>
 where
     C: Blockchain,
     T: RuntimeHostBuilder<C>,
 {
-    ctx: IndexingContext<C, T>,
+    pub ctx: IndexingContext<C, T>,
     state: IndexingState,
     inputs: Arc<IndexingInputs<C>>,
     logger: Logger,
@@ -69,7 +69,16 @@ where
         }
     }
 
-    pub async fn run(mut self) -> Result<(), Error> {
+    #[cfg(debug_assertions)]
+    pub async fn run_for_test(self, break_on_restart: bool) -> Result<Self, Error> {
+        self.run_inner(break_on_restart).await
+    }
+
+    pub async fn run(self) -> Result<Self, Error> {
+        self.run_inner(false).await
+    }
+
+    async fn run_inner(mut self, break_on_restart: bool) -> Result<Self, Error> {
         // If a subgraph failed for deterministic reasons, before start indexing, we first
         // revert the deployment head. It should lead to the same result since the error was
         // deterministic.
@@ -134,7 +143,12 @@ where
                     Action::Stop => {
                         info!(self.logger, "Stopping subgraph");
                         self.inputs.store.flush().await?;
-                        return Ok(());
+                        return Ok(self);
+                    }
+                    Action::Restart if break_on_restart => {
+                        info!(self.logger, "Stopping subgraph on break");
+                        self.inputs.store.flush().await?;
+                        return Ok(self);
                     }
                     Action::Restart => break,
                 };
@@ -796,6 +810,7 @@ where
                 // Without it, POI changes on failure would be kept in the entity cache
                 // and be transacted incorrectly in the next run.
                 self.state.entity_lfu_cache = LfuCache::new();
+                self.ctx.revert_data_sources(block_ptr.block_number())?;
 
                 self.metrics.stream.deployment_failed.set(1.0);
 
@@ -912,7 +927,7 @@ where
         // Revert the in-memory state:
         // - Revert any dynamic data sources.
         // - Clear the entity cache.
-        self.ctx.revert_data_sources(subgraph_ptr.number);
+        self.ctx.revert_data_sources(subgraph_ptr.number)?;
         self.state.entity_lfu_cache = LfuCache::new();
 
         Ok(Action::Continue)

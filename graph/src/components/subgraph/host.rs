@@ -68,6 +68,10 @@ pub trait RuntimeHost<C: Blockchain>: Send + Sync + 'static {
     /// Block number in which this host was created.
     /// Returns `None` for static data sources.
     fn creation_block_number(&self) -> Option<BlockNumber>;
+
+    /// Offchain data sources track done_at which is set once the
+    /// trigger has been processed.
+    fn done_at(&self) -> Option<BlockNumber>;
 }
 
 pub struct HostMetrics {

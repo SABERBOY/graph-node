@@ -26,18 +26,19 @@ use graph::prelude::ethabi::ethereum_types::H256;
 use graph::prelude::{
     async_trait, r, ApiVersion, BlockNumber, DeploymentHash, GraphQlRunner as _, LoggerFactory,
     MetricsRegistry, NodeId, QueryError, SubgraphAssignmentProvider, SubgraphName,
-    SubgraphRegistrar, SubgraphStore as _, SubgraphVersionSwitchingMode,
+    SubgraphRegistrar, SubgraphStore as _, SubgraphVersionSwitchingMode, TriggerProcessor,
 };
 use graph::slog::crit;
 use graph_core::polling_monitor::ipfs_service;
 use graph_core::{
     LinkResolver, SubgraphAssignmentProvider as IpfsSubgraphAssignmentProvider,
-    SubgraphInstanceManager, SubgraphRegistrar as IpfsSubgraphRegistrar,
+    SubgraphInstanceManager, SubgraphRegistrar as IpfsSubgraphRegistrar, SubgraphTriggerProcessor,
 };
 use graph_graphql::prelude::GraphQlRunner;
 use graph_mock::MockMetricsRegistry;
 use graph_node::manager::PanicSubscriptionManager;
 use graph_node::{config::Config, store_builder::StoreBuilder};
+use graph_runtime_wasm::RuntimeHostBuilder;
 use graph_store_postgres::{ChainHeadUpdateListener, ChainStore, Store, SubgraphStore};
 use slog::{info, Logger};
 use std::env::VarError;
@@ -109,10 +110,38 @@ pub struct TestContext {
     pub store: Arc<SubgraphStore>,
     pub deployment: DeploymentLocator,
     pub subgraph_name: SubgraphName,
+    pub instance_manager: SubgraphInstanceManager<graph_store_postgres::SubgraphStore>,
+    pub link_resolver: Arc<dyn graph::components::link_resolver::LinkResolver>,
     graphql_runner: Arc<GraphQlRunner<Store, PanicSubscriptionManager>>,
 }
 
 impl TestContext {
+    pub async fn runner(
+        &self,
+        stop_block: BlockPtr,
+    ) -> graph_core::SubgraphRunner<
+        graph_chain_ethereum::Chain,
+        RuntimeHostBuilder<graph_chain_ethereum::Chain>,
+    > {
+        let logger = self.logger.cheap_clone();
+        let deployment = self.deployment.cheap_clone();
+
+        // Stolen from the IPFS provider, there's prolly a nicer way to re-use it
+        let file_bytes = self
+            .link_resolver
+            .cat(&logger, &deployment.hash.to_ipfs_link())
+            .await
+            .unwrap();
+
+        let raw: serde_yaml::Mapping = serde_yaml::from_slice(&file_bytes).unwrap();
+        let tp: Box<dyn TriggerProcessor<_, _>> = Box::new(SubgraphTriggerProcessor {});
+
+        self.instance_manager
+            .build_subgraph_runner(logger, deployment, raw, Some(stop_block.block_number()), tp)
+            .await
+            .unwrap()
+    }
+
     pub async fn start_and_sync_to(&self, stop_block: BlockPtr, expect_healthy: bool) {
         self.provider
             .start(self.deployment.clone(), Some(stop_block.number))
@@ -282,7 +311,7 @@ pub async fn setup<C: Blockchain>(
     let subgraph_provider = Arc::new(IpfsSubgraphAssignmentProvider::new(
         &logger_factory,
         link_resolver.cheap_clone(),
-        subgraph_instance_manager,
+        subgraph_instance_manager.clone(),
     ));
 
     let panicking_subscription_manager = Arc::new(PanicSubscriptionManager {});
@@ -321,6 +350,8 @@ pub async fn setup<C: Blockchain>(
         deployment,
         subgraph_name,
         graphql_runner,
+        instance_manager: subgraph_instance_manager,
+        link_resolver,
     }
 }
 

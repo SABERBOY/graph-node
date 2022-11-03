@@ -30,12 +30,12 @@ pub type SharedInstanceKeepAliveMap = Arc<RwLock<HashMap<DeploymentId, CancelGua
 // Currently most of the changes are applied in `runner.rs`, but ideally more of that would be
 // refactored into the context so it wouldn't need `pub` fields. The entity cache should probably
 // also be moved here.
-pub(crate) struct IndexingContext<C, T>
+pub struct IndexingContext<C, T>
 where
     T: RuntimeHostBuilder<C>,
     C: Blockchain,
 {
-    instance: SubgraphInstance<C, T>,
+    pub instance: SubgraphInstance<C, T>,
     pub instances: SharedInstanceKeepAliveMap,
     pub filter: C::TriggerFilter,
     pub offchain_monitor: OffchainMonitor,
@@ -118,8 +118,14 @@ impl<C: Blockchain, T: RuntimeHostBuilder<C>> IndexingContext<C, T> {
     // to include data sources that have been reverted. This is not ideal for performance, but it
     // does not affect correctness since triggers that have no matching host will be ignored by
     // `process_trigger`.
-    pub fn revert_data_sources(&mut self, reverted_block: BlockNumber) {
-        self.instance.revert_data_sources(reverted_block)
+    pub fn revert_data_sources(&mut self, reverted_block: BlockNumber) -> Result<(), Error> {
+        let removed = self.instance.revert_data_sources(reverted_block);
+
+        removed
+            .iter()
+            .filter_map(|ds| ds.as_offchain())
+            .map(|ds| self.offchain_monitor.add_source(ds.source.clone()))
+            .collect()
     }
 
     pub fn add_dynamic_data_source(
@@ -144,7 +150,7 @@ impl<C: Blockchain, T: RuntimeHostBuilder<C>> IndexingContext<C, T> {
     }
 }
 
-pub(crate) struct OffchainMonitor {
+pub struct OffchainMonitor {
     ipfs_monitor: PollingMonitor<CidFile>,
     ipfs_monitor_rx: mpsc::Receiver<(CidFile, Bytes)>,
 }

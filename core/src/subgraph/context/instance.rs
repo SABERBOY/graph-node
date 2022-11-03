@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use super::OffchainMonitor;
 
-pub(crate) struct SubgraphInstance<C: Blockchain, T: RuntimeHostBuilder<C>> {
+pub struct SubgraphInstance<C: Blockchain, T: RuntimeHostBuilder<C>> {
     subgraph_id: DeploymentHash,
     network: String,
     host_builder: T,
@@ -22,7 +22,7 @@ pub(crate) struct SubgraphInstance<C: Blockchain, T: RuntimeHostBuilder<C>> {
     /// The runtime hosts are created and added in the same order the
     /// data sources appear in the subgraph manifest. Incoming block
     /// stream events are processed by the mappings in this same order.
-    hosts: Vec<Arc<T::Host>>,
+    pub hosts: Vec<Arc<T::Host>>,
 
     /// Maps the hash of a module to a channel to the thread in which the module is instantiated.
     module_cache: HashMap<[u8; 32], Sender<T::Req>>,
@@ -155,7 +155,35 @@ where
         })
     }
 
-    pub(super) fn revert_data_sources(&mut self, reverted_block: BlockNumber) {
+    pub(super) fn revert_data_sources(
+        &mut self,
+        reverted_block: BlockNumber,
+    ) -> Vec<DataSource<C>> {
+        let mut removed = self.revert_quick(reverted_block);
+
+        // The following code handles resetting offchain datasources so in most
+        // cases this is enough processing.
+        // At some point we prolly need to improve the linear search but for now this
+        // should be fine. *IT'S FINE*
+        if self.causality_region_seq.0 == CausalityRegion::ONCHAIN {
+            return removed;
+        }
+
+        // TODO: replace this with drain_filter once it's stabilised.
+        let (drained, hosts): (Vec<_>, Vec<_>) =
+            self.hosts.iter().cloned().partition(
+                |host| matches!(host.done_at(), Some(done_at) if done_at >= reverted_block),
+            );
+
+        self.hosts = hosts;
+        removed.extend(drained.iter().map(|host| host.data_source().clone()));
+
+        removed
+    }
+
+    fn revert_quick(&mut self, reverted_block: BlockNumber) -> Vec<DataSource<C>> {
+        let mut removed = vec![];
+
         // `hosts` is ordered by the creation block.
         // See also 8f1bca33-d3b7-4035-affc-fd6161a12448.
         while self
@@ -164,8 +192,10 @@ where
             .filter(|h| h.creation_block_number() >= Some(reverted_block))
             .is_some()
         {
-            self.hosts.pop();
+            removed.push(self.hosts.pop().unwrap().data_source().clone());
         }
+
+        removed
     }
 
     pub(super) fn hosts(&self) -> &[Arc<T::Host>] {

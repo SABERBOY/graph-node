@@ -20,6 +20,7 @@ use tokio::task;
 use super::context::OffchainMonitor;
 use super::SubgraphTriggerProcessor;
 
+#[derive(Clone)]
 pub struct SubgraphInstanceManager<S: SubgraphStore> {
     logger_factory: LoggerFactory,
     subgraph_store: Arc<S>,
@@ -181,7 +182,7 @@ impl<S: SubgraphStore> SubgraphInstanceManager<S> {
         }
     }
 
-    async fn build_subgraph_runner<C>(
+    pub async fn build_subgraph_runner<C>(
         &self,
         logger: Logger,
         deployment: DeploymentLocator,

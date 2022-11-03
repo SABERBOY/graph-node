@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use cid::Cid;
 
@@ -31,7 +31,7 @@ fn offchain_duplicate() {
         },
         context: Arc::new(None),
         creation_block: Some(0),
-        done_at: Mutex::new(None),
+        done_at: Arc::new(AtomicI32::new(0)),
         causality_region: CausalityRegion::ONCHAIN.next(),
     };
     let mut b = a.clone();
@@ -42,7 +42,7 @@ fn offchain_duplicate() {
     // The causality region, the creation block and the done status are ignored in the duplicate check.
     b.causality_region = a.causality_region.next();
     b.creation_block = Some(1);
-    *b.done_at.lock().unwrap() = Some(1);
+    b.done_at.store(1, Ordering::Relaxed);
     assert!(a.is_duplicate_of(&b));
 
     // The manifest idx, the source and the context are relevant for duplicate detection.

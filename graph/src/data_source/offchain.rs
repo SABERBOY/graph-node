@@ -22,6 +22,7 @@ use std::{
 use super::{CausalityRegion, DataSourceCreationError, TriggerWithHandler};
 
 pub const OFFCHAIN_KINDS: &'static [&'static str] = &["file/ipfs"];
+const NOT_DONE_VALUE: i32 = -1;
 
 #[derive(Debug, Clone)]
 pub struct DataSource {
@@ -50,7 +51,7 @@ impl DataSource {
 
     pub fn done_at(&self) -> Option<i32> {
         match self.done_at.load(std::sync::atomic::Ordering::Relaxed) {
-            0 => None,
+            NOT_DONE_VALUE => None,
             n => Some(n),
         }
     }

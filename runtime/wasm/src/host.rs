@@ -1,4 +1,5 @@
 use std::cmp::PartialEq;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -261,6 +262,16 @@ impl<C: Blockchain> RuntimeHostTrait<C> for RuntimeHost<C> {
         match self.data_source() {
             DataSource::Onchain(_) => None,
             DataSource::Offchain(ds) => ds.done_at(),
+        }
+    }
+
+    fn set_done_at(&self, block: Option<BlockNumber>) -> Option<BlockNumber> {
+        match self.data_source() {
+            DataSource::Onchain(_) => None,
+            DataSource::Offchain(ds) => {
+                ds.done_at.store(block.unwrap_or(0), Ordering::Relaxed);
+                ds.done_at()
+            }
         }
     }
 }

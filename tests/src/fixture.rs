@@ -112,6 +112,7 @@ pub struct TestContext {
     pub subgraph_name: SubgraphName,
     pub instance_manager: SubgraphInstanceManager<graph_store_postgres::SubgraphStore>,
     pub link_resolver: Arc<dyn graph::components::link_resolver::LinkResolver>,
+    pub env_vars: Arc<EnvVars>,
     graphql_runner: Arc<GraphQlRunner<Store, PanicSubscriptionManager>>,
 }
 
@@ -137,7 +138,14 @@ impl TestContext {
         let tp: Box<dyn TriggerProcessor<_, _>> = Box::new(SubgraphTriggerProcessor {});
 
         self.instance_manager
-            .build_subgraph_runner(logger, deployment, raw, Some(stop_block.block_number()), tp)
+            .build_subgraph_runner(
+                logger,
+                self.env_vars.cheap_clone(),
+                deployment,
+                raw,
+                Some(stop_block.block_number()),
+                tp,
+            )
             .await
             .unwrap()
     }
@@ -254,10 +262,10 @@ pub async fn setup<C: Blockchain>(
     graft_block: Option<BlockPtr>,
     env_vars: Option<EnvVars>,
 ) -> TestContext {
-    let env_vars = match env_vars {
+    let env_vars = Arc::new(match env_vars {
         Some(ev) => ev,
         None => EnvVars::from_env().unwrap(),
-    };
+    });
 
     let logger = graph::log::logger(true);
     let logger_factory = LoggerFactory::new(logger.clone(), None);
@@ -288,6 +296,7 @@ pub async fn setup<C: Blockchain>(
     let blockchain_map = Arc::new(blockchain_map);
     let subgraph_instance_manager = SubgraphInstanceManager::new(
         &logger_factory,
+        env_vars.cheap_clone(),
         subgraph_store.clone(),
         blockchain_map.clone(),
         mock_registry.clone(),
@@ -352,6 +361,7 @@ pub async fn setup<C: Blockchain>(
         graphql_runner,
         instance_manager: subgraph_instance_manager,
         link_resolver,
+        env_vars,
     }
 }
 

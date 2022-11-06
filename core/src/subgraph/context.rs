@@ -35,7 +35,7 @@ where
     T: RuntimeHostBuilder<C>,
     C: Blockchain,
 {
-    pub instance: SubgraphInstance<C, T>,
+    instance: SubgraphInstance<C, T>,
     pub instances: SharedInstanceKeepAliveMap,
     pub filter: C::TriggerFilter,
     pub offchain_monitor: OffchainMonitor,
@@ -122,9 +122,8 @@ impl<C: Blockchain, T: RuntimeHostBuilder<C>> IndexingContext<C, T> {
         let removed = self.instance.revert_data_sources(reverted_block);
 
         removed
-            .iter()
-            .filter_map(|ds| ds.as_offchain())
-            .map(|ds| self.offchain_monitor.add_source(ds.source.clone()))
+            .into_iter()
+            .map(|source| self.offchain_monitor.add_source(source))
             .collect()
     }
 
@@ -147,6 +146,11 @@ impl<C: Blockchain, T: RuntimeHostBuilder<C>> IndexingContext<C, T> {
 
     pub fn causality_region_next_value(&mut self) -> CausalityRegion {
         self.instance.causality_region_next_value()
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn instance(&self) -> &SubgraphInstance<C, T> {
+        &self.instance
     }
 }
 

@@ -19,6 +19,7 @@ use graph::data::subgraph::{
 use graph::data_source::{
     offchain, DataSource, DataSourceCreationError, DataSourceTemplate, TriggerData,
 };
+use graph::env::EnvVars;
 use graph::prelude::*;
 use graph::util::{backoff::ExponentialBackoff, lfu_cache::LfuCache};
 use std::sync::Arc;
@@ -33,7 +34,7 @@ where
     C: Blockchain,
     T: RuntimeHostBuilder<C>,
 {
-    pub ctx: IndexingContext<C, T>,
+    ctx: IndexingContext<C, T>,
     state: IndexingState,
     inputs: Arc<IndexingInputs<C>>,
     logger: Logger,
@@ -50,6 +51,7 @@ where
         ctx: IndexingContext<C, T>,
         logger: Logger,
         metrics: RunnerMetrics,
+        env_vars: Arc<EnvVars>,
     ) -> Self {
         Self {
             inputs: Arc::new(inputs),
@@ -59,14 +61,19 @@ where
                 synced: false,
                 skip_ptr_updates_timer: Instant::now(),
                 backoff: ExponentialBackoff::new(
-                    (MINUTE * 2).min(ENV_VARS.subgraph_error_retry_ceil),
-                    ENV_VARS.subgraph_error_retry_ceil,
+                    (MINUTE * 2).min(env_vars.subgraph_error_retry_ceil),
+                    env_vars.subgraph_error_retry_ceil,
                 ),
                 entity_lfu_cache: LfuCache::new(),
             },
             logger,
             metrics,
         }
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn context(&self) -> &IndexingContext<C, T> {
+        &self.ctx
     }
 
     #[cfg(debug_assertions)]

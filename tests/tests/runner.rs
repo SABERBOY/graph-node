@@ -310,7 +310,8 @@ async fn retry_create_ds() {
     let chain = Arc::new(chain(blocks, &stores, Some(triggers_adapter)).await);
 
     let mut env_vars = EnvVars::default();
-    env_vars.subgraph_error_retry_ceil = Duration::from_secs(2);
+    env_vars.subgraph_error_retry_ceil = Duration::from_secs(1);
+
     let ctx = fixture::setup(
         subgraph_name.clone(),
         &hash,
@@ -321,7 +322,11 @@ async fn retry_create_ds() {
     )
     .await;
 
-    let runner = ctx.runner(stop_block).await;
-    let runner = runner.run_for_test(true).await.unwrap();
-    assert_eq!(runner.ctx.instance.hosts.len(), 1);
+    let runner = ctx
+        .runner(stop_block)
+        .await
+        .run_for_test(true)
+        .await
+        .unwrap();
+    assert_eq!(runner.context().instance().hosts().len(), 2);
 }

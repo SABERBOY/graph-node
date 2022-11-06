@@ -72,6 +72,10 @@ pub trait RuntimeHost<C: Blockchain>: Send + Sync + 'static {
     /// Offchain data sources track done_at which is set once the
     /// trigger has been processed.
     fn done_at(&self) -> Option<BlockNumber>;
+
+    /// Convenience function to avoid leaking internal representation of
+    /// mutable number
+    fn set_done_at(&self, block: Option<BlockNumber>) -> Option<BlockNumber>;
 }
 
 pub struct HostMetrics {

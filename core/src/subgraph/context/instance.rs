@@ -2,7 +2,8 @@ use futures01::sync::mpsc::Sender;
 use graph::{
     blockchain::Blockchain,
     data_source::{
-        causality_region::CausalityRegionSeq, CausalityRegion, DataSource, DataSourceTemplate,
+        causality_region::CausalityRegionSeq, offchain, CausalityRegion, DataSource,
+        DataSourceTemplate,
     },
     prelude::*,
 };
@@ -22,7 +23,7 @@ pub struct SubgraphInstance<C: Blockchain, T: RuntimeHostBuilder<C>> {
     /// The runtime hosts are created and added in the same order the
     /// data sources appear in the subgraph manifest. Incoming block
     /// stream events are processed by the mappings in this same order.
-    pub hosts: Vec<Arc<T::Host>>,
+    hosts: Vec<Arc<T::Host>>,
 
     /// Maps the hash of a module to a channel to the thread in which the module is instantiated.
     module_cache: HashMap<[u8; 32], Sender<T::Req>>,
@@ -155,35 +156,36 @@ where
         })
     }
 
+    /// Reverts any DataSources that have been added from the block forwards (inclusively)
+    /// This function also reverts the done_at status if it was 'done' on this block or later.
+    /// It only returns the offchain::Source because we don't currently need to know which
+    /// DataSources were removed, the source is used so that the offchain DDS can be found again.
     pub(super) fn revert_data_sources(
         &mut self,
         reverted_block: BlockNumber,
-    ) -> Vec<DataSource<C>> {
-        let mut removed = self.revert_quick(reverted_block);
+    ) -> Vec<offchain::Source> {
+        self.revert_quick(reverted_block);
 
         // The following code handles resetting offchain datasources so in most
         // cases this is enough processing.
         // At some point we prolly need to improve the linear search but for now this
         // should be fine. *IT'S FINE*
         if self.causality_region_seq.0 == CausalityRegion::ONCHAIN {
-            return removed;
+            return vec![];
         }
 
-        // TODO: replace this with drain_filter once it's stabilised.
-        let (drained, hosts): (Vec<_>, Vec<_>) =
-            self.hosts.iter().cloned().partition(
-                |host| matches!(host.done_at(), Some(done_at) if done_at >= reverted_block),
-            );
-
-        self.hosts = hosts;
-        removed.extend(drained.iter().map(|host| host.data_source().clone()));
-
-        removed
+        self.hosts
+            .iter()
+            .filter(|host| matches!(host.done_at(), Some(done_at) if done_at >= reverted_block))
+            .map(|host| {
+                host.set_done_at(None);
+                // Safe to call unwrap() because only offchain DataSources have done_at = Some
+                host.data_source().as_offchain().unwrap().source.clone()
+            })
+            .collect()
     }
 
-    fn revert_quick(&mut self, reverted_block: BlockNumber) -> Vec<DataSource<C>> {
-        let mut removed = vec![];
-
+    fn revert_quick(&mut self, reverted_block: BlockNumber) {
         // `hosts` is ordered by the creation block.
         // See also 8f1bca33-d3b7-4035-affc-fd6161a12448.
         while self
@@ -192,13 +194,11 @@ where
             .filter(|h| h.creation_block_number() >= Some(reverted_block))
             .is_some()
         {
-            removed.push(self.hosts.pop().unwrap().data_source().clone());
+            self.hosts.pop().unwrap().data_source();
         }
-
-        removed
     }
 
-    pub(super) fn hosts(&self) -> &[Arc<T::Host>] {
+    pub fn hosts(&self) -> &[Arc<T::Host>] {
         &self.hosts
     }
 

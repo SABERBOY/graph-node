@@ -269,7 +269,8 @@ async fn template_static_filters_false_positives() {
     );
 }
 
-#[tokio::test]
+// #[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn retry_create_ds() {
     let stores = stores("./integration-tests/config.simple.toml").await;
     let subgraph_name = SubgraphName::new("data-source-revert").unwrap();
